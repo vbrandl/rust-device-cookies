@@ -5,12 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Login {
+struct UserPass {
     user: String,
     pass: String,
 }
 
-impl LoginMessage for Login {
+impl LoginMessage for UserPass {
     type Identity = String;
     fn identity(&self) -> &Self::Identity {
         &self.user
@@ -27,7 +27,7 @@ struct InMemoryProvider {
 }
 
 impl Provider for InMemoryProvider {
-    type LoginMessage = Login;
+    type LoginMessage = UserPass;
     type LoginResult = bool;
     type IdentFailIterator = HashSet<Instant>;
     type CookieFailIterator = HashSet<Instant>;
@@ -59,7 +59,6 @@ impl Provider for InMemoryProvider {
             .entry(cookie.clone())
             .or_insert(HashSet::new())
             .insert(now);
-        // .insert((now, cookie.identity().to_string()));
     }
 
     fn reset_for_cookie(&mut self, cookie: &DeviceCookie) {
@@ -85,6 +84,10 @@ impl Provider for InMemoryProvider {
             .or_insert(HashSet::new())
             .insert(now);
     }
+
+    fn reset_for_identity(&mut self, identity: &<Self::LoginMessage as LoginMessage>::Identity) {
+        self.failed_attempts_identity.remove(identity);
+    }
 }
 
 impl InMemoryProvider {
@@ -99,15 +102,15 @@ impl InMemoryProvider {
     }
 }
 
-fn invalid_login() -> Login {
-    Login {
+fn invalid_login() -> UserPass {
+    UserPass {
         user: "foo".to_string(),
-        pass: "pass".to_string(),
+        pass: "invalid_pass".to_string(),
     }
 }
 
-fn valid_login() -> Login {
-    Login {
+fn valid_login() -> UserPass {
+    UserPass {
         user: "foo".to_string(),
         pass: "bar".to_string(),
     }
@@ -138,35 +141,35 @@ fn valid_login_blocked_after_limit_without_cookie() {
     );
 }
 
-// #[test]
-// fn valid_login_resets_tries_without_cookie() {
-//     let mut provider = InMemoryProvider::new(3, Duration::from_secs(60), vec![1, 2, 3]);
-//     assert_eq!(
-//         LoginStatus::Invalid,
-//         provider.perform_login(invalid_login(), None)
-//     );
-//     assert_eq!(
-//         LoginStatus::Invalid,
-//         provider.perform_login(invalid_login(), None)
-//     );
-//     assert!(provider.perform_login(valid_login(), None).is_valid());
-//     assert_eq!(
-//         LoginStatus::Invalid,
-//         provider.perform_login(invalid_login(), None)
-//     );
-//     assert_eq!(
-//         LoginStatus::Invalid,
-//         provider.perform_login(invalid_login(), None)
-//     );
-//     assert_eq!(
-//         LoginStatus::Invalid,
-//         provider.perform_login(invalid_login(), None)
-//     );
-//     assert_eq!(
-//         LoginStatus::Blocked,
-//         provider.perform_login(valid_login(), None)
-//     );
-// }
+#[test]
+fn valid_login_resets_tries_without_cookie() {
+    let mut provider = InMemoryProvider::new(3, Duration::from_secs(60), vec![1, 2, 3]);
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), None)
+    );
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), None)
+    );
+    assert!(provider.perform_login(valid_login(), None).is_valid());
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), None)
+    );
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), None)
+    );
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), None)
+    );
+    assert_eq!(
+        LoginStatus::Blocked,
+        provider.perform_login(valid_login(), None)
+    );
+}
 
 #[test]
 fn valid_login_blocked_after_limit_with_cookie() {
@@ -303,5 +306,134 @@ proptest! {
         let validation_provider = InMemoryProvider::new(3, Duration::from_secs(60), vec![3,2,1]);
         let cookie = creation_provider.sign_cookie(&identity, nonce);
         assert!(!validation_provider.valid_cookie_for_identity(&cookie));
+    }
+}
+
+#[test]
+fn unblock_after_lock_time_without_cookie() {
+    let cooldown = Duration::from_secs(1);
+    let mut provider = InMemoryProvider::new(3, cooldown, vec![1, 2, 3]);
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), None)
+    );
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), None)
+    );
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), None)
+    );
+    assert_eq!(
+        LoginStatus::Blocked,
+        provider.perform_login(valid_login(), None)
+    );
+    std::thread::sleep(cooldown);
+    assert!(provider.perform_login(valid_login(), None).is_valid());
+}
+
+#[test]
+fn unblock_after_lock_time_without_invalid_cookie() {
+    let cooldown = Duration::from_secs(1);
+    let mut provider = InMemoryProvider::new(3, cooldown, vec![1, 2, 3]);
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), Some(invalid_cookie()))
+    );
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), Some(invalid_cookie()))
+    );
+    assert_eq!(
+        LoginStatus::Invalid,
+        provider.perform_login(invalid_login(), Some(invalid_cookie()))
+    );
+    assert_eq!(
+        LoginStatus::Blocked,
+        provider.perform_login(valid_login(), Some(invalid_cookie()))
+    );
+    std::thread::sleep(cooldown);
+    assert!(provider
+        .perform_login(valid_login(), Some(invalid_cookie()))
+        .is_valid());
+}
+
+#[test]
+fn unblock_after_lock_time_without_valid_cookie() {
+    let cooldown = Duration::from_secs(1);
+    let mut provider = InMemoryProvider::new(3, cooldown, vec![1, 2, 3]);
+    if let LoginStatus::Valid(cookie) = provider.perform_login(valid_login(), None) {
+        assert_eq!(
+            LoginStatus::Invalid,
+            provider.perform_login(invalid_login(), Some(cookie.clone()))
+        );
+        assert_eq!(
+            LoginStatus::Invalid,
+            provider.perform_login(invalid_login(), Some(cookie.clone()))
+        );
+        assert_eq!(
+            LoginStatus::Invalid,
+            provider.perform_login(invalid_login(), Some(cookie.clone()))
+        );
+        assert_eq!(
+            LoginStatus::Blocked,
+            provider.perform_login(valid_login(), Some(cookie.clone()))
+        );
+        std::thread::sleep(cooldown);
+        assert!(provider
+            .perform_login(valid_login(), Some(cookie))
+            .is_valid());
+    } else {
+        panic!()
+    }
+}
+
+#[test]
+fn multiple_logins_without_cookie_dont_block() {
+    let mut provider = InMemoryProvider::new(3, Duration::from_secs(60), vec![1, 2, 3]);
+    assert!(provider.perform_login(valid_login(), None).is_valid());
+    assert!(provider.perform_login(valid_login(), None).is_valid());
+    assert!(provider.perform_login(valid_login(), None).is_valid());
+    assert!(provider.perform_login(valid_login(), None).is_valid());
+    assert!(provider.perform_login(valid_login(), None).is_valid());
+}
+
+#[test]
+fn multiple_logins_with_cookie_dont_block() {
+    let mut provider = InMemoryProvider::new(3, Duration::from_secs(60), vec![1, 2, 3]);
+    if let LoginStatus::Valid(cookie) = provider.perform_login(valid_login(), None) {
+        assert!(provider
+            .perform_login(valid_login(), Some(cookie.clone()))
+            .is_valid());
+        assert!(provider
+            .perform_login(valid_login(), Some(cookie.clone()))
+            .is_valid());
+        assert!(provider
+            .perform_login(valid_login(), Some(cookie.clone()))
+            .is_valid());
+        assert!(provider
+            .perform_login(valid_login(), Some(cookie.clone()))
+            .is_valid());
+        assert!(provider
+            .perform_login(valid_login(), Some(cookie))
+            .is_valid());
+    } else {
+        panic!()
+    }
+}
+
+#[test]
+fn cookies_contain_random_nonce() {
+    let mut provider = InMemoryProvider::new(3, Duration::from_secs(60), vec![1, 2, 3]);
+    // compare 3 cookies to make accidental collisions less likely
+    if let (LoginStatus::Valid(cookie1), LoginStatus::Valid(cookie2), LoginStatus::Valid(cookie3)) = (
+        provider.perform_login(valid_login(), None),
+        provider.perform_login(valid_login(), None),
+        provider.perform_login(valid_login(), None),
+    ) {
+        assert!(cookie1 != cookie2 || cookie1 != cookie3 || cookie2 != cookie3);
+    } else {
+        panic!()
     }
 }
