@@ -2,6 +2,7 @@
 //! This crate implements device cookies, a method to prevent login bruteforce attacks as described
 //! by OWASP: https://www.owasp.org/index.php/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies
 
+use rand::Rng;
 use ring::hmac;
 use std::{
     fmt::Display,
@@ -119,6 +120,8 @@ pub trait Provider {
         identity: &<Self::LoginMessage as LoginMessage>::Identity,
         when: Instant,
     );
+    /// Resets the failed login attempts for the given identity.
+    fn reset_for_identity(&mut self, identity: &<Self::LoginMessage as LoginMessage>::Identity);
     /// Returns all failed login attempts for a given identity
     fn failures_for_cookie(&self, cookie: &DeviceCookie) -> Option<Self::CookieFailIterator>;
     /// Get the number of invalid login attempts for a given device cookie.
@@ -135,7 +138,7 @@ pub trait Provider {
     /// Logs a failed login attempt for the given cookie.
     fn log_for_cookie(&mut self, cookie: &DeviceCookie, now: Instant);
     /// Resets the failed login attempts for the given device cookie.
-    fn reset_for_cookie(&mut self, identity: &DeviceCookie);
+    fn reset_for_cookie(&mut self, cookie: &DeviceCookie);
     /// Check if a device cookie is valid for the identity stored inside.
     fn valid_cookie_for_identity(&self, cookie: &DeviceCookie) -> bool {
         let key = hmac::Key::new(hmac::HMAC_SHA512, self.key());
@@ -175,9 +178,9 @@ pub trait Provider {
             if tries < self.tries() {
                 if self.validate_login(&msg).is_valid() {
                     self.reset_for_cookie(&cookie);
+                    let mut rng = rand::thread_rng();
                     LoginStatus::Valid(
-                        // TODO: generate random nonce
-                        self.sign_cookie(msg.identity(), 0),
+                        self.sign_cookie(msg.identity(), rng.gen()),
                     )
                 } else {
                     self.log_for_cookie(&cookie, Instant::now());
@@ -191,10 +194,10 @@ pub trait Provider {
             let tries = self.tries_for_identity(msg.identity());
             if tries < self.tries() {
                 if self.validate_login(&msg).is_valid() {
-                    // self.set_for_identity(msg.identity(), 0, Instant::now());
+                    self.reset_for_identity(&msg.identity());
+                    let mut rng = rand::thread_rng();
                     LoginStatus::Valid(
-                        // TODO: generate random nonce
-                        self.sign_cookie(msg.identity(), 0),
+                        self.sign_cookie(msg.identity(), rng.gen()),
                     )
                 } else {
                     self.log_for_identity(msg.identity(), Instant::now());
