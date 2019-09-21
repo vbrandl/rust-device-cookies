@@ -179,9 +179,7 @@ pub trait Provider {
                 if self.validate_login(&msg).is_valid() {
                     self.reset_for_cookie(&cookie);
                     let mut rng = rand::thread_rng();
-                    LoginStatus::Valid(
-                        self.sign_cookie(msg.identity(), rng.gen()),
-                    )
+                    LoginStatus::Valid(self.sign_cookie(msg.identity(), rng.gen()))
                 } else {
                     self.log_for_cookie(&cookie, Instant::now());
                     LoginStatus::Invalid
@@ -196,9 +194,7 @@ pub trait Provider {
                 if self.validate_login(&msg).is_valid() {
                     self.reset_for_identity(&msg.identity());
                     let mut rng = rand::thread_rng();
-                    LoginStatus::Valid(
-                        self.sign_cookie(msg.identity(), rng.gen()),
-                    )
+                    LoginStatus::Valid(self.sign_cookie(msg.identity(), rng.gen()))
                 } else {
                     self.log_for_identity(msg.identity(), Instant::now());
                     LoginStatus::Invalid
