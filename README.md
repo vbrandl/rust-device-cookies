@@ -1,5 +1,9 @@
 # Device Cookies
 
+[![Actions Status](https://github.com/vbrandl/rust-device-cookies/workflows/Rust/badge.svg)](https://github.com/vbrandl/rust-device-cookies/actions)
+[![Hits-of-Code](https://hitsofcode.com/github/vbrandl/rust-device-cookies)](https://hitsofcode.com/view/github/vbrandl/rust-device-cookies)
+[![dependency status](https://deps.rs/repo/github/vbrandl/rust-device-cookies/status.svg)](https://deps.rs/repo/github/vbrandl/rust-device-cookies)
+
 **WARNING**: This is a work in progress and I am still working on the API.
 
 This crate provides a trait and default implementation for [device cookies][0]
